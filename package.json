@@ -1,0 +1,23 @@
+{
+  "name": "netcdf-map-viewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Upload a NetCDF (.nc) file and view its geophysical variables on an interactive map.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "h5wasm": "^0.7.8",
+    "leaflet": "^1.9.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-leaflet": "^4.2.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^5.4.11"
+  }
+}
