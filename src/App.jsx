@@ -65,7 +65,9 @@ export default function App() {
   const [variables, setVariables] = useState([]); // from first file
   const [variable, setVariable] = useState("");
   const [frames, setFrames] = useState([]);       // [{name,time,regridded}]
-  const [range, setRange] = useState([0, 1]);     // shared color scale
+  const [range, setRange] = useState([0, 1]);     // auto (data-derived) scale
+  const [fixedRange, setFixedRange] = useState(null); // preset override, or null
+  const [preset, setPreset] = useState("auto");
   const [dataUrls, setDataUrls] = useState([]);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -154,11 +156,12 @@ export default function App() {
     (async () => {
       setBusy(true);
       if (frames.length > 1) setStatus("프레임 렌더링…");
+      const eff = fixedRange || range;
       const urls = [];
       for (let k = 0; k < frames.length; k++) {
         if (cancelled || myRun !== runId.current) return;
         urls.push(renderCanvas(frames[k].regridded, {
-          cmap, vmin: range[0], vmax: range[1], log, opacity,
+          cmap, vmin: eff[0], vmax: eff[1], log, opacity,
         }));
         if (k % 4 === 3) await new Promise((r) => setTimeout(r, 0));
       }
@@ -168,7 +171,7 @@ export default function App() {
       setStatus(frames.length > 1 ? `${frames.length}개 프레임` : "");
     })();
     return () => { cancelled = true; };
-  }, [frames, cmap, log, opacity, range]);
+  }, [frames, cmap, log, opacity, range, fixedRange]);
 
   // Playback timer.
   useEffect(() => {
@@ -178,13 +181,14 @@ export default function App() {
   }, [playing, fps, dataUrls.length]);
 
   const cur = frames[idx];
+  const effRange = fixedRange || range; // preset overrides the auto scale
   const bounds = cur?.regridded.bounds;
   const overlayBounds = bounds
     ? [[bounds[0], bounds[1]], [bounds[2], bounds[3]]] : null;
   const fitB = frames[0]?.regridded.bounds; // stable extent for FitBounds
 
   const ticks = useMemo(() => {
-    const [lo, hi] = range;
+    const [lo, hi] = effRange;
     return [0, 1, 2, 3, 4].map((i) => {
       const f = i / 4;
       const val = log && lo > 0
@@ -192,13 +196,21 @@ export default function App() {
         : lo + f * (hi - lo);
       return { f, val };
     });
-  }, [range, log]);
+  }, [effRange, log]);
 
   const fmt = (x) =>
     Math.abs(x) >= 100 ? x.toFixed(0) : Math.abs(x) >= 1 ? x.toFixed(1) : x.toFixed(2);
   const curVar = variables.find((v) => v.path === variable);
   const unit = cur?.regridded.units || curVar?.units || "";
   const multi = frames.length > 1;
+
+  // Presets bundle scale type + range + colormap. "khoa" matches the KHOA/NOSC
+  // preview: linear 0–30 on a jet ramp. "auto" = data-driven log + turbo.
+  function applyPreset(p) {
+    setPreset(p);
+    if (p === "khoa") { setCmap("jet"); setLog(false); setFixedRange([0, 30]); }
+    else { setCmap("turbo"); setLog(true); setFixedRange(null); }
+  }
 
   return (
     <div className="app">
@@ -230,6 +242,13 @@ export default function App() {
 
         {variables.length > 0 && (
           <>
+            <div className="field">
+              <label>표현 프리셋</label>
+              <select value={preset} onChange={(e) => applyPreset(e.target.value)}>
+                <option value="auto">자동 (데이터 기준 · 로그 · turbo)</option>
+                <option value="khoa">KHOA 기준 (선형 0–30 · jet)</option>
+              </select>
+            </div>
             <div className="field">
               <label>변수</label>
               <select value={variable} onChange={(e) => setVariable(e.target.value)}>
@@ -272,7 +291,8 @@ export default function App() {
 
         {cur && (
           <div className="meta">
-            범위(전체 공유): {fmt(range[0])} ~ {fmt(range[1])} {unit}<br />
+            범위: {fmt(effRange[0])} ~ {fmt(effRange[1])} {unit}
+            {fixedRange ? " (KHOA 고정)" : " (자동)"}<br />
             격자: {cur.regridded.ncol} × {cur.regridded.nrow}
             {multi && <><br />프레임 {idx + 1}/{frames.length}</>}
           </div>
@@ -327,7 +347,7 @@ export default function App() {
             <div className="overlay-panel legend">
               <div className="cap">
                 {curVar?.long_name || curVar?.name}{unit ? ` (${unit})` : ""}
-                {log && range[0] > 0 ? " · 로그" : ""}
+                {log && effRange[0] > 0 ? " · 로그" : ""}
               </div>
               <div className="lgbody">
                 <div className="bar"
