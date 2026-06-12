@@ -66,15 +66,15 @@ export default function App() {
   const [variable, setVariable] = useState("");
   const [frames, setFrames] = useState([]);       // [{name,time,regridded}]
   const [range, setRange] = useState([0, 1]);     // auto (data-derived) scale
-  const [fixedRange, setFixedRange] = useState(null); // preset override, or null
-  const [preset, setPreset] = useState("auto");
+  const [fixedRange, setFixedRange] = useState([0, 30]); // KHOA default override
+  const [preset, setPreset] = useState("khoa");
   const [dataUrls, setDataUrls] = useState([]);
   const [idx, setIdx] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [fps, setFps] = useState(4);
 
-  const [cmap, setCmap] = useState("turbo");
-  const [log, setLog] = useState(true);
+  const [cmap, setCmap] = useState("jet");
+  const [log, setLog] = useState(false);
   const [opacity, setOpacity] = useState(0.85);
 
   const [status, setStatus] = useState("");
