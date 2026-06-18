@@ -2,6 +2,11 @@ node_modules
 dist
 *.log
 
+# secrets — never commit the real key (keep .env.example)
+.env
+.env.local
+.env.*.local
+
 # OS / editor cruft
 .DS_Store
 

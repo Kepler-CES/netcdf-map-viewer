@@ -22,6 +22,7 @@ npm run preview  # 빌드 결과 미리보기
 ## 기능
 
 - **드래그&드롭 / 클릭 업로드** — `.nc`, `.nc4`, `.h5`, `.hdf5` (여러 개 가능)
+- **NOSC API에서 불러오기** — 인증키·날짜·슬롯·산출물로 NOSC/KHOA OpenAPI를 조회해 NetCDF를 직접 받아 표시. 여러 건이면 타임랩스로 로드. (아래 "NOSC OpenAPI 연동" 참고)
 - **타임랩스** — 여러 파일을 올리면 파일명의 `YYYYMMDD_HHMMSS`로 시간 정렬해 슬라이더+재생(▶/⏸, 2~15 fps). 모든 프레임이 **공유 색상 스케일**을 써서 시간에 따른 변화를 비교할 수 있습니다.
 - **표현 프리셋** — 기본값은 `KHOA 기준`(선형 0–30 · jet)으로, NOSC/KHOA 미리보기와 동일한 색 스케일입니다. `자동`(데이터 기준 · 로그 · turbo)으로 전환하면 값 분포에 맞춰 대비를 키워 볼 수 있습니다.
 - **변수 자동 탐지** — 2차원 변수 목록에서 선택, `latitude`/`longitude`를 좌표로 자동 인식
@@ -29,6 +30,15 @@ npm run preview  # 빌드 결과 미리보기
 - **마우스 호버 값 표시** — 해당 지점의 위경도와 변수 값
 - 다크 베이스맵(CARTO) 위에 오버레이, 데이터 영역으로 자동 줌
 - **줌·이동 제한** — 데이터 영역이 화면을 꽉 채우는 줌을 `minZoom`으로 고정하고 `maxBounds`로 영역 밖 이동을 막습니다. 타일은 `noWrap`으로 가로 반복을 끕니다.
+
+## NOSC OpenAPI 연동
+
+NOSC/KHOA 국가해양위성센터의 "위성NetCDF정보 API"(`/openapi/GK2BNcMedia/search.do`)로 GOCI-II NetCDF 목록을 조회하고 파일을 직접 받아 표시합니다. 사이드바의 **NOSC API에서 불러오기**를 펼쳐 인증키·날짜·슬롯·산출물(RI 등)을 넣고 `조회` → 결과에서 단일/전체(타임랩스) 불러오기.
+
+- **인증키**: [NOSC OpenAPI 약관/발급](https://www.nosc.go.kr/openapi/actionOpenApiIssue.do)에서 본인 키를 발급받아 입력합니다(코드에 키를 넣지 않습니다).
+- **CORS/프록시**: 정부 서버는 HTTP이고 CORS 헤더가 없어 브라우저에서 직접 호출이 막힙니다. 그래서 `vite.config.js`에 개발 프록시(`/nosc` → `http://nosc.go.kr`)를 두었고, **이 기능은 `npm run dev`에서만 동작**합니다. 정적 배포 시에는 같은 경로를 받아줄 백엔드/프록시가 별도로 필요합니다.
+- **슬롯**: 0~11(타일), 13(한반도 전체). **산출물**: RI(적조)·Chl·AC·TSS·CDOM·Kd·Zsd·PP·FA.
+- **다운로드 경로**: 한반도 합성(LA) 파일은 NOSC 웹의 "합성영상 nc"(`/program/mergeNoscImgFile.do?obs_date_kst=YYYY-MM-DD HH&product_type=…`)에서 **압축본(~130MB)** 을 받아 빠릅니다. API의 `filePath`(OPeNDAP)는 같은 파일을 **비압축(~1.45GB)** 으로 주므로, 합성본 경로가 실패할 때의 폴백으로만 씁니다.
 
 ## 메모리 / 성능
 
