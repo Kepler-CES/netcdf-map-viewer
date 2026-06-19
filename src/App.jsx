@@ -1,16 +1,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  MapContainer, TileLayer, ImageOverlay, useMap, useMapEvents,
+  MapContainer, TileLayer, ImageOverlay, CircleMarker, Popup,
+  useMap, useMapEvents,
 } from "react-leaflet";
 import {
   openNetCDF, closeDoc, regrid, dataRange, renderCanvas, mercatorY,
 } from "./lib/netcdf.js";
 import { COLORMAPS, gradientCss } from "./lib/colormaps.js";
 import { searchNetcdf, sourceFromResult } from "./lib/nosc.js";
+import { fetchRedtideList, fetchRedtideDetail } from "./lib/nifs.js";
+import { geocodeArea } from "./lib/redtide-geocode.js";
 
-// NOSC service key from .env (VITE_ prefix required for client exposure).
-// Create a `.env` with: VITE_NOSC_SERVICE_KEY=발급받은키
+// Gov OpenAPI service keys from .env (VITE_ prefix required for client exposure).
+// Create a `.env` with: VITE_NOSC_SERVICE_KEY=… and VITE_NIFS_SERVICE_KEY=…
 const ENV_KEY = import.meta.env.VITE_NOSC_SERVICE_KEY || "";
+const NIFS_KEY = import.meta.env.VITE_NIFS_SERVICE_KEY || "";
+
+// Marker color by peak algal density (개체/mL): higher = more severe.
+function densityColor(d) {
+  if (d == null) return "#9aa6b8";
+  if (d >= 1000) return "#ff3b3b";
+  if (d >= 100) return "#ff8a3b";
+  return "#ffd23b";
+}
 
 // Pull an observation time out of a GOCI-style filename: ..._YYYYMMDD_HHMMSS_...
 function parseTime(name, fallback) {
@@ -31,6 +43,12 @@ function fmtTime(ms) {
     `${p(d.getUTCHours())}:${p(d.getUTCMinutes())} UTC`;
 }
 
+// "20160814" -> "2016-08-14" (NIFS rdate is a bare YYYYMMDD string).
+function fmtRdate(s) {
+  const m = String(s).match(/^(\d{4})(\d{2})(\d{2})$/);
+  return m ? `${m[1]}-${m[2]}-${m[3]}` : String(s || "");
+}
+
 // Fit the data extent, then lock min zoom so the bounds always fill the
 // viewport (no zooming out into empty/repeated world), and clamp panning.
 function FitBounds({ bounds }) {
@@ -44,6 +62,22 @@ function FitBounds({ bounds }) {
     map.setMaxBounds(b);
     map.options.maxBoundsViscosity = 1.0;
   }, [bounds, map]);
+  return null;
+}
+
+// When red-tide markers are shown without any NetCDF data loaded, frame the map
+// on the markers (data-layer FitBounds is inactive in that case).
+function FitToPoints({ points, enabled }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!enabled || !points.length) return;
+    const lats = points.map((p) => p.lat);
+    const lons = points.map((p) => p.lon);
+    map.fitBounds(
+      [[Math.min(...lats), Math.min(...lons)], [Math.max(...lats), Math.max(...lons)]],
+      { padding: [50, 50], maxZoom: 9 },
+    );
+  }, [points, enabled, map]);
   return null;
 }
 
@@ -100,6 +134,12 @@ export default function App() {
     const p = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
   };
+  const isoDaysAgo = (n) => {
+    const d = new Date();
+    d.setDate(d.getDate() - n);
+    const p = (x) => String(x).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+  };
   const [showApi, setShowApi] = useState(false);
   const [apiStart, setApiStart] = useState(todayLocal);
   const [apiEnd, setApiEnd] = useState(todayLocal);
@@ -108,6 +148,19 @@ export default function App() {
   const [apiRows, setApiRows] = useState([]);
   const [apiBusy, setApiBusy] = useState(false);
   const [apiMsg, setApiMsg] = useState("");
+
+  // NIFS 적조정보 (red-tide alert) panel state. Default to the last 7 days.
+  const [showRt, setShowRt] = useState(false);
+  const [rtStart, setRtStart] = useState(() => isoDaysAgo(7));
+  const [rtEnd, setRtEnd] = useState(todayLocal);
+  const [rtRows, setRtRows] = useState([]);          // [{srcode, rdate, events}]
+  const [rtBusy, setRtBusy] = useState(false);
+  const [rtMsg, setRtMsg] = useState("");
+  const [rtOpen, setRtOpen] = useState(null);        // expanded srcode
+  const [rtDetail, setRtDetail] = useState(null);    // detail for rtOpen
+  const [rtDetailBusy, setRtDetailBusy] = useState(false);
+  const [rtMarkersOn, setRtMarkersOn] = useState(true);
+  const rtDetailRun = useRef(0); // cancels stale detail fetches (fast item switches)
 
   // Read a dropped/selected file list: grab variables from the first file,
   // pick a sensible default variable, and stash the list for processing.
@@ -157,6 +210,53 @@ export default function App() {
   const loadResults = useCallback((rows) => {
     if (rows.length) loadFiles(rows.map(sourceFromResult));
   }, [loadFiles]);
+
+  // Query the NIFS 적조정보 API for the selected date range.
+  const doRtSearch = useCallback(async () => {
+    setRtBusy(true); setRtMsg("조회 중…"); setRtRows([]);
+    setRtOpen(null); setRtDetail(null);
+    try {
+      const rows = await fetchRedtideList({
+        serviceKey: NIFS_KEY, sdate: rtStart, edate: rtEnd,
+      });
+      setRtRows(rows);
+      const events = rows.reduce((n, r) => n + r.events.length, 0);
+      setRtMsg(rows.length
+        ? `적조 속보 ${rows.length}건 · 발생 ${events}건`
+        : "해당 기간 적조 정보 없음");
+    } catch (e) {
+      setRtMsg(e.message || String(e));
+    } finally {
+      setRtBusy(false);
+    }
+  }, [rtStart, rtEnd]);
+
+  // Expand/collapse a 속보; fetch its detail (진행상황/특보/전망/당부사항) on open.
+  const toggleRtDetail = useCallback(async (srcode) => {
+    if (rtOpen === srcode) { setRtOpen(null); setRtDetail(null); return; }
+    const myRun = ++rtDetailRun.current; // ignore results from earlier clicks
+    setRtOpen(srcode); setRtDetail(null); setRtDetailBusy(true);
+    try {
+      const d = await fetchRedtideDetail({ serviceKey: NIFS_KEY, srcode });
+      if (myRun === rtDetailRun.current) setRtDetail(d);
+    } catch (e) {
+      if (myRun === rtDetailRun.current) setRtDetail({ error: e.message || String(e) });
+    } finally {
+      if (myRun === rtDetailRun.current) setRtDetailBusy(false);
+    }
+  }, [rtOpen]);
+
+  // Geocode each observation's 조사해역 to an approximate marker.
+  const rtMarkers = useMemo(() => {
+    const pts = [];
+    for (const row of rtRows) {
+      for (const ev of row.events) {
+        const g = geocodeArea(ev.oarea);
+        if (g) pts.push({ ...g, ...ev, rdate: row.rdate, srcode: row.srcode });
+      }
+    }
+    return pts;
+  }, [rtRows]);
 
   // Process every file for the selected variable (sequential, memory-bounded).
   useEffect(() => {
@@ -355,6 +455,95 @@ export default function App() {
           )}
         </div>
 
+        <div className="apibox">
+          <button className="apitoggle" onClick={() => setShowRt((s) => !s)}>
+            {showRt ? "▾" : "▸"} 적조 정보 / 알림
+            {rtRows.length > 0 && <span className="rtbadge">🔴 {rtRows.length}</span>}
+          </button>
+          {showRt && (
+            <div className="apibody">
+              {NIFS_KEY
+                ? <div className="apinote">인증키: .env에서 불러옴</div>
+                : <div className="status err">.env에 VITE_NIFS_SERVICE_KEY를 설정하세요</div>}
+              <div className="row2">
+                <label className="ap">시작일
+                  <input type="date" value={rtStart} onChange={(e) => setRtStart(e.target.value)} /></label>
+                <label className="ap">종료일
+                  <input type="date" value={rtEnd} onChange={(e) => setRtEnd(e.target.value)} /></label>
+              </div>
+              <button className="apibtn" onClick={doRtSearch} disabled={rtBusy}>적조 정보 조회</button>
+              {rtMsg && (
+                <div className={`status${/오류|실패|없음|확인|설정/i.test(rtMsg) ? " err" : ""}`}>
+                  {rtBusy && <span className="spinner" />}{rtMsg}
+                </div>
+              )}
+              {rtMarkers.length > 0 && (
+                <label className="apinote" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <input type="checkbox" checked={rtMarkersOn}
+                    onChange={(e) => setRtMarkersOn(e.target.checked)} />
+                  지도에 발생 위치 표시 ({rtMarkers.length}개 · 시·군 근사)
+                </label>
+              )}
+              {rtRows.length > 0 && (
+                <ul className="rtlist">
+                  {rtRows.map((row) => (
+                    <li key={row.srcode} className="rtitem">
+                      <button className="rthead" onClick={() => toggleRtDetail(row.srcode)}>
+                        <span className="rtdate">{fmtRdate(row.rdate)}</span>
+                        <span className="rtareas">
+                          {row.events.map((e) => e.oarea).filter(Boolean).slice(0, 2).join(" / ")
+                            || "조사해역 미상"}
+                          {row.events.length > 2 ? ` 외 ${row.events.length - 2}` : ""}
+                        </span>
+                        <span className="rtchev">{rtOpen === row.srcode ? "▾" : "▸"}</span>
+                      </button>
+                      {rtOpen === row.srcode && (
+                        <div className="rtdetail">
+                          <table className="rttable">
+                            <tbody>
+                              {row.events.map((e, i) => (
+                                <tr key={i}>
+                                  <td>{e.oarea}</td>
+                                  <td className="rtsp">{e.dname}</td>
+                                  <td className="rtnum">
+                                    {e.sdensity != null ? `${fmt(e.sdensity)}~${fmt(e.edensity)}` : "—"}
+                                    <span className="rtu"> cells/mL</span>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {rtDetailBusy && <div className="status"><span className="spinner" />상세 불러오는 중…</div>}
+                          {rtDetail?.error && <div className="status err">{rtDetail.error}</div>}
+                          {rtDetail && !rtDetail.error && (
+                            <div className="rttext">
+                              {[
+                                ["진행상황", rtDetail.pstate],
+                                ["특보상황", rtDetail.sreport],
+                                ["금후전망", rtDetail.aview],
+                                ["당부사항", rtDetail.rmatter],
+                                ["기타", rtDetail.etc],
+                              ].filter(([, v]) => v && v.trim()).map(([k, v]) => (
+                                <div key={k} className="rtsect">
+                                  <div className="rtk">{k}</div>
+                                  <div className="rtv">{v.trim()}</div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <a className="apilink" href="https://www.nifs.go.kr/main.do" target="_blank" rel="noreferrer">
+                국립수산과학원 적조속보 →
+              </a>
+            </div>
+          )}
+        </div>
+
         {variables.length > 0 && (
           <>
             <div className="field">
@@ -425,6 +614,29 @@ export default function App() {
             <ImageOverlay url={dataUrls[idx]} bounds={overlayBounds} opacity={1} />
           )}
           {fitB && <FitBounds bounds={fitB} />}
+          {rtMarkersOn && rtMarkers.map((p, i) => (
+            <CircleMarker
+              key={`${p.srcode}-${i}`}
+              center={[p.lat, p.lon]}
+              radius={7}
+              pathOptions={{
+                color: densityColor(p.edensity), fillColor: densityColor(p.edensity),
+                fillOpacity: 0.6, weight: 1.5,
+              }}
+            >
+              <Popup>
+                <div className="rtpop">
+                  <strong>{p.oarea}</strong><br />
+                  원인생물: {p.dname || "—"}<br />
+                  생물밀도: {p.sdensity != null ? `${fmt(p.sdensity)}~${fmt(p.edensity)} cells/mL` : "—"}<br />
+                  수온: {p.swt != null ? `${fmt(p.swt)}~${fmt(p.ewt)} ℃` : "—"}<br />
+                  조사일시: {fmtRdate(p.rdate)}<br />
+                  <span className="rtpopnote">※ 위치는 {p.matched} 기준 근사</span>
+                </div>
+              </Popup>
+            </CircleMarker>
+          ))}
+          <FitToPoints points={rtMarkers} enabled={rtMarkersOn && !frames.length} />
           <Hover regridded={cur?.regridded}
             onValue={(v, latlng) => setHover({ v, latlng })} />
         </MapContainer>

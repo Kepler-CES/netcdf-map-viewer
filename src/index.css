@@ -80,6 +80,32 @@ html, body, #root {
 .apinote { font-size: 11px; color: var(--muted); }
 .apilink { font-size: 11px; color: var(--accent); text-decoration: none; }
 
+/* 적조 정보 / 알림 panel */
+.rtbadge { float: right; font-size: 11px; color: #ff8a8a; font-weight: 600; }
+.rtlist { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 6px; }
+.rtitem { border-bottom: 1px solid var(--line); }
+.rtitem:last-child { border-bottom: none; }
+.rthead { width: 100%; display: flex; align-items: center; gap: 7px; background: none;
+  border: none; color: var(--text); padding: 7px 8px; font-size: 11.5px; cursor: pointer;
+  text-align: left; }
+.rthead:hover { background: #1b2230; }
+.rtdate { color: var(--muted); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.rtareas { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rtchev { flex: 0 0 auto; color: var(--muted); }
+.rtdetail { padding: 6px 8px 9px; background: #11151d; }
+.rttable { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+.rttable td { padding: 3px 4px; border-top: 1px solid var(--line); vertical-align: top; }
+.rttable .rtsp { color: var(--muted); font-style: italic; }
+.rttable .rtnum { white-space: nowrap; text-align: right; font-variant-numeric: tabular-nums; }
+.rttable .rtu { color: var(--muted); font-size: 9px; }
+.rttext { margin-top: 8px; display: flex; flex-direction: column; gap: 8px; }
+.rtsect .rtk { font-size: 11px; color: var(--accent); font-weight: 600; margin-bottom: 2px; }
+.rtsect .rtv { font-size: 11px; color: var(--text); line-height: 1.5; white-space: pre-wrap;
+  word-break: break-word; }
+.rtpop { font-size: 12px; line-height: 1.6; }
+.rtpopnote { color: #888; font-size: 10px; }
+
 .map-wrap { position: relative; flex: 1; }
 .leaflet-container { height: 100%; width: 100%; background: #0d1017; }
 
