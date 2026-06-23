@@ -55,6 +55,8 @@ export default defineConfig({
     react(),
     govApiDev("nosc-api-dev", "/nosc", "https://nosc.go.kr"),
     govApiDev("nifs-api-dev", "/nifs", "https://www.nifs.go.kr"),
+    // 공공데이터포털(data.go.kr) — 해양수산부 연속정보 수온(15분) 등.
+    govApiDev("dataportal-api-dev", "/dataportal", "https://apis.data.go.kr"),
   ],
   optimizeDeps: { exclude: ["h5wasm"] },
   server: { fs: { strict: false } },
